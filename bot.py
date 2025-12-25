@@ -5,7 +5,7 @@ import os
 
 # ================== الإعدادات ==================
 TOKEN = os.getenv("TOKEN")
-ADMIN_ID = 1188982651  # ID الأدمن
+ADMIN_ID = 642912725  # ID الأدمن
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
