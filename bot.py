@@ -5,7 +5,7 @@ import os
 
 # ================== الإعدادات ==================
 TOKEN = os.getenv("TOKEN")
-ADMIN_ID = 1188982651  # حط ID تبعك
+ADMIN_ID = 1188982651  # ID الأدمن
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
@@ -14,23 +14,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SUBJECTS_DIR = os.path.join(BASE_DIR, "subjects")
 USERS_FILE = os.path.join(BASE_DIR, "users.txt")
 
-# ================== المواد ==================
-subjects = [
-    "أساسيات التمريض عملي",
-    "أساسيات التمريض نظري",
-    "الأحياء الدقيقة",
-    "التخدير والإنعاش عملي 1",
-    "التخدير والإنعاش نظري 1",
-    "التشريح 1 عملي",
-    "التشريح 1 نظري",
-    "المصطلحات الطبية",
-    "فيزيولوجيا 1",
-    "معدات التخدير عملي",
-    "معدات التخدير نظري",
-    "مهارات التواصل"
-]
-
-# ================== أدوات المستخدمين ==================
+# ================== المستخدمين ==================
 def get_users():
     if not os.path.exists(USERS_FILE):
         return []
@@ -55,17 +39,19 @@ def remove_user(uid):
 start_kb = ReplyKeyboardMarkup(resize_keyboard=True)
 start_kb.add("ابدأ")
 
-subjects_kb = ReplyKeyboardMarkup(resize_keyboard=True)
-for s in subjects:
-    subjects_kb.add(s)
-subjects_kb.add("🔙 رجوع")
+semester_kb = ReplyKeyboardMarkup(resize_keyboard=True)
+semester_kb.add("📘 فصل أول", "📗 فصل ثاني")
+semester_kb.add("🔙 رجوع")
 
 admin_kb = ReplyKeyboardMarkup(resize_keyboard=True)
 admin_kb.add("ابدأ")
 admin_kb.add("📊 إحصائيات", "🚫 إخراج مستخدم")
 admin_kb.add("📢 رسالة جماعية")
 
-# ================== /start ==================
+# ================== متغير الجلسة ==================
+user_semester = {}
+
+# ================== start ==================
 @dp.message_handler(commands=["start"])
 async def start(msg: types.Message):
     if msg.from_user.id == ADMIN_ID:
@@ -102,25 +88,42 @@ async def reject(call: types.CallbackQuery):
     await bot.send_message(uid, "❌ تم الرفض")
     await call.message.edit_text("تم الرفض")
 
-# ================== عرض المواد ==================
+# ================== ابدأ ==================
 @dp.message_handler(lambda m: m.text == "ابدأ")
-async def show_subjects(msg: types.Message):
-    await msg.answer("اختر مادة 📚", reply_markup=subjects_kb)
+async def choose_semester(msg: types.Message):
+    await msg.answer("اختر الفصل الدراسي:", reply_markup=semester_kb)
 
-@dp.message_handler(lambda m: m.text in subjects)
+# ================== اختيار الفصل ==================
+@dp.message_handler(lambda m: m.text in ["📘 فصل أول", "📗 فصل ثاني"])
+async def semester_selected(msg: types.Message):
+    semester = "فصل أول" if "أول" in msg.text else "فصل ثاني"
+    user_semester[msg.from_user.id] = semester
+
+    folder = os.path.join(SUBJECTS_DIR, semester)
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+
+    for s in os.listdir(folder):
+        kb.add(s)
+
+    kb.add("🔙 رجوع")
+    await msg.answer(f"📚 مواد {semester}:", reply_markup=kb)
+
+# ================== إرسال الملفات ==================
+@dp.message_handler(lambda m: m.from_user.id in user_semester)
 async def send_files(msg: types.Message):
-    folder = os.path.join(SUBJECTS_DIR, msg.text)
-    if not os.path.exists(folder):
-        await msg.answer("❌ لا يوجد ملفات لهذه المادة")
+    semester = user_semester[msg.from_user.id]
+    subject_path = os.path.join(SUBJECTS_DIR, semester, msg.text)
+
+    if not os.path.exists(subject_path):
         return
 
-    files = os.listdir(folder)
+    files = os.listdir(subject_path)
     if not files:
-        await msg.answer("❌ المجلد فارغ")
+        await msg.answer("❌ لا يوجد ملفات")
         return
 
     for file in files:
-        with open(os.path.join(folder, file), "rb") as f:
+        with open(os.path.join(subject_path, file), "rb") as f:
             await msg.answer_document(f)
 
 # ================== رجوع ==================
@@ -147,7 +150,7 @@ async def stats(msg: types.Message):
 
     await msg.answer(text, reply_markup=admin_kb)
 
-# ================== إخراج مستخدم ==================
+# ================== إخراج ==================
 @dp.message_handler(lambda m: m.text == "🚫 إخراج مستخدم" and m.from_user.id == ADMIN_ID)
 async def ask_delete(msg: types.Message):
     await msg.answer("أرسل ID المستخدم")
@@ -160,19 +163,18 @@ async def delete_user(msg: types.Message):
 # ================== رسالة جماعية ==================
 @dp.message_handler(lambda m: m.text == "📢 رسالة جماعية" and m.from_user.id == ADMIN_ID)
 async def ask_broadcast(msg: types.Message):
-    await msg.answer("✍️ أرسل الرسالة ليتم إرسالها للجميع")
+    await msg.answer("✍️ أرسل الرسالة")
 
 @dp.message_handler(lambda m: m.from_user.id == ADMIN_ID and m.reply_to_message is None)
 async def broadcast(msg: types.Message):
-    users = get_users()
     sent = 0
-    for uid in users:
+    for uid in get_users():
         try:
             await bot.send_message(int(uid), msg.text)
             sent += 1
         except:
             pass
-    await msg.answer(f"✅ تم إرسال الرسالة إلى {sent} مستخدم")
+    await msg.answer(f"✅ تم الإرسال إلى {sent} مستخدم")
 
 # ================== تشغيل ==================
 if __name__ == "__main__":
