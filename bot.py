@@ -1,6 +1,9 @@
 import os
 import threading
+import requests
+from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
@@ -12,12 +15,11 @@ if not TOKEN:
 
 ADMIN_ID = 642912725
 
+# 🔴 حط رابط Google Sheets Web App هون
+SHEET_URL = "https://script.google.com/macros/s/AKfycbwEikV411sfmARd3IB4VpDYi1tsjMlNYqyc1eUgUwhLulPPhO5aYNS2KV4nPuz6zyqgMg/exec"
+
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-USERS_FILE = os.path.join(BASE_DIR, "users.txt")
-SUBJECTS_DIR = os.path.join(BASE_DIR, "subjects")
 
 # ================== المواد ==================
 TERM1_SUBJECTS = [
@@ -45,27 +47,31 @@ TERM2_SUBJECTS = [
     "علم وظائف الأعضاء 2"
 ]
 
-# ================== مستخدمين ==================
-def load_users():
-    if not os.path.exists(USERS_FILE):
-        return []
-    with open(USERS_FILE, "r", encoding="utf-8") as f:
-        return [line.strip().split("|") for line in f if line.strip()]
+# ================== Google Sheets ==================
+def sheet_get_users():
+    r = requests.get(SHEET_URL, params={"action": "get"})
+    return r.json()
 
-def save_user(user):
-    users = load_users()
-    if not any(u[0] == user[0] for u in users):
-        with open(USERS_FILE, "a", encoding="utf-8") as f:
-            f.write("|".join(user) + "\n")
+def sheet_add_user(uid, name, username):
+    requests.post(SHEET_URL, json={
+        "action": "add",
+        "id": uid,
+        "name": name,
+        "username": username,
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+    })
 
-def remove_user(uid):
-    users = [u for u in load_users() if u[0] != str(uid)]
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        for u in users:
-            f.write("|".join(u) + "\n")
+def sheet_remove_user(uid):
+    requests.post(SHEET_URL, json={
+        "action": "remove",
+        "id": uid
+    })
 
 def is_approved(uid):
-    return uid == ADMIN_ID or any(u[0] == str(uid) for u in load_users())
+    if uid == ADMIN_ID:
+        return True
+    users = sheet_get_users()
+    return any(str(u["id"]) == str(uid) for u in users)
 
 # ================== كيبورد ==================
 start_kb = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -114,7 +120,7 @@ async def start(message: types.Message):
 async def approve(call: types.CallbackQuery):
     uid = call.data.split("_")[1]
     user = await bot.get_chat(uid)
-    save_user([uid, user.full_name, user.username or "—"])
+    sheet_add_user(uid, user.full_name, user.username or "—")
     await bot.send_message(uid, "✅ تمت الموافقة، أرسل /start")
     await call.message.edit_text("✅ تمت الموافقة")
 
@@ -137,23 +143,6 @@ async def term1(message: types.Message):
 async def term2(message: types.Message):
     await message.answer("مواد الفصل الثاني:", reply_markup=subjects_kb(TERM2_SUBJECTS))
 
-# ================== إرسال الملفات ==================
-@dp.message_handler(lambda m: m.text in TERM1_SUBJECTS + TERM2_SUBJECTS)
-async def send_files(message: types.Message):
-    term = "term1" if message.text in TERM1_SUBJECTS else "term2"
-    path = os.path.join(SUBJECTS_DIR, term, message.text)
-
-    if not os.path.exists(path):
-        await message.answer("❌ لا يوجد ملفات لهذه المادة")
-        return
-
-    for file in os.listdir(path):
-        fp = os.path.join(path, file)
-        if file.lower().endswith(".pdf"):
-            await message.answer_document(open(fp, "rb"))
-        else:
-            await message.answer_photo(open(fp, "rb"))
-
 # ================== رجوع ==================
 @dp.message_handler(lambda m: m.text == "🔙 رجوع")
 async def back(message: types.Message):
@@ -165,10 +154,10 @@ async def back(message: types.Message):
 # ================== إحصائيات ==================
 @dp.message_handler(lambda m: m.text == "📊 إحصائيات" and m.from_user.id == ADMIN_ID)
 async def stats(message: types.Message):
-    users = load_users()
+    users = sheet_get_users()
     text = f"👥 العدد: {len(users)}\n\n"
     for u in users:
-        text += f"👤 {u[1]}\n🔗 @{u[2]}\n🆔 {u[0]}\n──────\n"
+        text += f"👤 {u['name']}\n🔗 @{u['username']}\n🆔 {u['id']}\n──────\n"
     await message.answer(text, reply_markup=admin_kb)
 
 # ================== طرد ==================
@@ -178,7 +167,7 @@ async def ask_id(message: types.Message):
 
 @dp.message_handler(lambda m: m.from_user.id == ADMIN_ID and m.text.isdigit())
 async def kick_user(message: types.Message):
-    remove_user(message.text)
+    sheet_remove_user(message.text)
     await message.answer("✅ تم الطرد – سيُطلب منه موافقة جديدة", reply_markup=admin_kb)
 
 # ================== رسالة جماعية ==================
@@ -188,9 +177,10 @@ async def broadcast(message: types.Message):
 
     @dp.message_handler(lambda m: m.from_user.id == ADMIN_ID)
     async def send_all(msg: types.Message):
-        for u in load_users():
+        users = sheet_get_users()
+        for u in users:
             try:
-                await bot.send_message(u[0], msg.text)
+                await bot.send_message(u["id"], msg.text)
             except:
                 pass
         await msg.answer("✅ تم الإرسال", reply_markup=admin_kb)
