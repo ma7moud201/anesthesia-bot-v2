@@ -20,7 +20,7 @@ USERS_FILE = os.path.join(BASE_DIR, "users.txt")
 SUBJECTS_DIR = os.path.join(BASE_DIR, "subjects")
 
 # ================== المواد ==================
-term1_SUBJECTS = [
+TERM1_SUBJECTS = [
     "أساسيات التمريض عملي",
     "أساسيات التمريض نظري",
     "الأحياء الدقيقة",
