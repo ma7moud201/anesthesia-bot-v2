@@ -1,181 +1,212 @@
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
-import os
 
-# ================== الإعدادات ==================
+# ================== إعدادات ==================
 TOKEN = os.getenv("TOKEN")
-ADMIN_ID = 642912725  # ID الأدمن
+if not TOKEN:
+    raise RuntimeError("TOKEN not found")
+
+ADMIN_ID = 642912725
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SUBJECTS_DIR = os.path.join(BASE_DIR, "subjects")
 USERS_FILE = os.path.join(BASE_DIR, "users.txt")
+SUBJECTS_DIR = os.path.join(BASE_DIR, "subjects")
 
-# ================== المستخدمين ==================
-def get_users():
+# ================== المواد ==================
+TERM1_SUBJECTS = [
+    "أساسيات التمريض عملي",
+    "أساسيات التمريض نظري",
+    "الأحياء الدقيقة",
+    "التخدير والإنعاش عملي 1",
+    "التخدير والإنعاش نظري 1",
+    "التشريح 1 عملي",
+    "التشريح 1 نظري",
+    "المصطلحات الطبية",
+    "فيزيولوجيا 1",
+    "معدات التخدير عملي",
+    "معدات التخدير نظري",
+    "مهارات التواصل"
+]
+
+TERM2_SUBJECTS = [
+    "أدوية التخدير",
+    "التخدير والإنعاش 2",
+    "المراقبة السريرية",
+    "الإسعافات الأولية",
+    "الوبائيات والعدوى",
+    "أخلاقيات المهنة",
+    "علم وظائف الأعضاء 2"
+]
+
+# ================== مستخدمين ==================
+def load_users():
     if not os.path.exists(USERS_FILE):
         return []
     with open(USERS_FILE, "r", encoding="utf-8") as f:
-        return [u.strip() for u in f if u.strip()]
+        return [line.strip().split("|") for line in f if line.strip()]
 
-def is_approved(uid):
-    return uid == ADMIN_ID or str(uid) in get_users()
-
-def approve_user(uid):
-    if str(uid) not in get_users():
+def save_user(user):
+    users = load_users()
+    if not any(u[0] == user[0] for u in users):
         with open(USERS_FILE, "a", encoding="utf-8") as f:
-            f.write(str(uid) + "\n")
+            f.write("|".join(user) + "\n")
 
 def remove_user(uid):
-    users = [u for u in get_users() if u != str(uid)]
+    users = [u for u in load_users() if u[0] != str(uid)]
     with open(USERS_FILE, "w", encoding="utf-8") as f:
         for u in users:
-            f.write(u + "\n")
+            f.write("|".join(u) + "\n")
 
-# ================== الكيبورد ==================
+def is_approved(uid):
+    return uid == ADMIN_ID or any(u[0] == str(uid) for u in load_users())
+
+# ================== كيبورد ==================
 start_kb = ReplyKeyboardMarkup(resize_keyboard=True)
 start_kb.add("ابدأ")
 
-semester_kb = ReplyKeyboardMarkup(resize_keyboard=True)
-semester_kb.add("📘 فصل أول", "📗 فصل ثاني")
-semester_kb.add("🔙 رجوع")
-
 admin_kb = ReplyKeyboardMarkup(resize_keyboard=True)
-admin_kb.add("ابدأ")
-admin_kb.add("📊 إحصائيات", "🚫 إخراج مستخدم")
+admin_kb.add("📊 إحصائيات", "🚫 طرد مستخدم")
 admin_kb.add("📢 رسالة جماعية")
+admin_kb.add("ابدأ")
 
-# ================== متغير الجلسة ==================
-user_semester = {}
+term_kb = ReplyKeyboardMarkup(resize_keyboard=True)
+term_kb.add("📘 الفصل الأول", "📗 الفصل الثاني")
+term_kb.add("🔙 رجوع")
 
-# ================== start ==================
+def subjects_kb(subjects):
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    for s in subjects:
+        kb.add(s)
+    kb.add("🔙 رجوع")
+    return kb
+
+# ================== START ==================
 @dp.message_handler(commands=["start"])
-async def start(msg: types.Message):
-    if msg.from_user.id == ADMIN_ID:
-        await msg.answer("👑 لوحة الأدمن", reply_markup=admin_kb)
-        return
-
-    if not is_approved(msg.from_user.id):
+async def start(message: types.Message):
+    if not is_approved(message.from_user.id):
         kb = InlineKeyboardMarkup()
         kb.add(
-            InlineKeyboardButton("✅ موافقة", callback_data=f"approve_{msg.from_user.id}"),
-            InlineKeyboardButton("❌ رفض", callback_data=f"reject_{msg.from_user.id}")
+            InlineKeyboardButton("✅ موافقة", callback_data=f"approve_{message.from_user.id}"),
+            InlineKeyboardButton("❌ رفض", callback_data=f"reject_{message.from_user.id}")
         )
         await bot.send_message(
             ADMIN_ID,
-            f"طلب دخول:\n{msg.from_user.full_name}\n{msg.from_user.id}",
+            f"طلب جديد:\n👤 {message.from_user.full_name}\n🔗 @{message.from_user.username}\n🆔 {message.from_user.id}",
             reply_markup=kb
         )
-        await msg.answer("⏳ بانتظار الموافقة")
+        await message.answer("⏳ تم إرسال طلبك للموافقة")
         return
 
-    await msg.answer("أهلاً 👋", reply_markup=start_kb)
+    if message.from_user.id == ADMIN_ID:
+        await message.answer("👑 لوحة الأدمن", reply_markup=admin_kb)
+    else:
+        await message.answer("أهلاً بك 👋", reply_markup=start_kb)
 
-# ================== الموافقة ==================
+# ================== موافقة ==================
 @dp.callback_query_handler(lambda c: c.data.startswith("approve_"))
 async def approve(call: types.CallbackQuery):
-    uid = int(call.data.split("_")[1])
-    approve_user(uid)
+    uid = call.data.split("_")[1]
+    user = await bot.get_chat(uid)
+    save_user([uid, user.full_name, user.username or "—"])
     await bot.send_message(uid, "✅ تمت الموافقة، أرسل /start")
-    await call.message.edit_text("تمت الموافقة")
+    await call.message.edit_text("✅ تمت الموافقة")
 
 @dp.callback_query_handler(lambda c: c.data.startswith("reject_"))
 async def reject(call: types.CallbackQuery):
-    uid = int(call.data.split("_")[1])
-    await bot.send_message(uid, "❌ تم الرفض")
-    await call.message.edit_text("تم الرفض")
-
-# ================== ابدأ ==================
-@dp.message_handler(lambda m: m.text == "ابدأ")
-async def choose_semester(msg: types.Message):
-    await msg.answer("اختر الفصل الدراسي:", reply_markup=semester_kb)
+    uid = call.data.split("_")[1]
+    await bot.send_message(uid, "❌ تم رفض طلبك")
+    await call.message.edit_text("❌ تم الرفض")
 
 # ================== اختيار الفصل ==================
-@dp.message_handler(lambda m: m.text in ["📘 فصل أول", "📗 فصل ثاني"])
-async def semester_selected(msg: types.Message):
-    semester = "فصل أول" if "أول" in msg.text else "فصل ثاني"
-    user_semester[msg.from_user.id] = semester
+@dp.message_handler(lambda m: m.text == "ابدأ")
+async def choose_term(message: types.Message):
+    await message.answer("اختر الفصل:", reply_markup=term_kb)
 
-    folder = os.path.join(SUBJECTS_DIR, semester)
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+@dp.message_handler(lambda m: m.text == "📘 الفصل الأول")
+async def term1(message: types.Message):
+    await message.answer("مواد الفصل الأول:", reply_markup=subjects_kb(TERM1_SUBJECTS))
 
-    for s in os.listdir(folder):
-        kb.add(s)
-
-    kb.add("🔙 رجوع")
-    await msg.answer(f"📚 مواد {semester}:", reply_markup=kb)
+@dp.message_handler(lambda m: m.text == "📗 الفصل الثاني")
+async def term2(message: types.Message):
+    await message.answer("مواد الفصل الثاني:", reply_markup=subjects_kb(TERM2_SUBJECTS))
 
 # ================== إرسال الملفات ==================
-@dp.message_handler(lambda m: m.from_user.id in user_semester)
-async def send_files(msg: types.Message):
-    semester = user_semester[msg.from_user.id]
-    subject_path = os.path.join(SUBJECTS_DIR, semester, msg.text)
+@dp.message_handler(lambda m: m.text in TERM1_SUBJECTS + TERM2_SUBJECTS)
+async def send_files(message: types.Message):
+    term = "term1" if message.text in TERM1_SUBJECTS else "term2"
+    path = os.path.join(SUBJECTS_DIR, term, message.text)
 
-    if not os.path.exists(subject_path):
+    if not os.path.exists(path):
+        await message.answer("❌ لا يوجد ملفات لهذه المادة")
         return
 
-    files = os.listdir(subject_path)
-    if not files:
-        await msg.answer("❌ لا يوجد ملفات")
-        return
-
-    for file in files:
-        with open(os.path.join(subject_path, file), "rb") as f:
-            await msg.answer_document(f)
+    for file in os.listdir(path):
+        fp = os.path.join(path, file)
+        if file.lower().endswith(".pdf"):
+            await message.answer_document(open(fp, "rb"))
+        else:
+            await message.answer_photo(open(fp, "rb"))
 
 # ================== رجوع ==================
 @dp.message_handler(lambda m: m.text == "🔙 رجوع")
-async def go_back(msg: types.Message):
-    if msg.from_user.id == ADMIN_ID:
-        await msg.answer("👑 لوحة الأدمن", reply_markup=admin_kb)
+async def back(message: types.Message):
+    if message.from_user.id == ADMIN_ID:
+        await message.answer("👑 لوحة الأدمن", reply_markup=admin_kb)
     else:
-        await msg.answer("أهلاً 👋", reply_markup=start_kb)
+        await message.answer("🏠 القائمة الرئيسية", reply_markup=start_kb)
 
 # ================== إحصائيات ==================
 @dp.message_handler(lambda m: m.text == "📊 إحصائيات" and m.from_user.id == ADMIN_ID)
-async def stats(msg: types.Message):
-    users = get_users()
-    text = f"📊 عدد المستخدمين: {len(users)}\n\n"
+async def stats(message: types.Message):
+    users = load_users()
+    text = f"👥 العدد: {len(users)}\n\n"
+    for u in users:
+        text += f"👤 {u[1]}\n🔗 @{u[2]}\n🆔 {u[0]}\n──────\n"
+    await message.answer(text, reply_markup=admin_kb)
 
-    for uid in users:
-        try:
-            chat = await bot.get_chat(int(uid))
-            username = f"@{chat.username}" if chat.username else "بدون"
-            text += f"👤 {chat.full_name}\n🔗 {username}\n🆔 {uid}\n\n"
-        except:
-            text += f"🆔 {uid}\n\n"
+# ================== طرد ==================
+@dp.message_handler(lambda m: m.text == "🚫 طرد مستخدم" and m.from_user.id == ADMIN_ID)
+async def ask_id(message: types.Message):
+    await message.answer("أرسل ID المستخدم")
 
-    await msg.answer(text, reply_markup=admin_kb)
-
-# ================== إخراج ==================
-@dp.message_handler(lambda m: m.text == "🚫 إخراج مستخدم" and m.from_user.id == ADMIN_ID)
-async def ask_delete(msg: types.Message):
-    await msg.answer("أرسل ID المستخدم")
-
-@dp.message_handler(lambda m: m.text.isdigit() and m.from_user.id == ADMIN_ID)
-async def delete_user(msg: types.Message):
-    remove_user(msg.text)
-    await msg.answer("✅ تم إخراج المستخدم", reply_markup=admin_kb)
+@dp.message_handler(lambda m: m.from_user.id == ADMIN_ID and m.text.isdigit())
+async def kick_user(message: types.Message):
+    remove_user(message.text)
+    await message.answer("✅ تم الطرد – سيُطلب منه موافقة جديدة", reply_markup=admin_kb)
 
 # ================== رسالة جماعية ==================
 @dp.message_handler(lambda m: m.text == "📢 رسالة جماعية" and m.from_user.id == ADMIN_ID)
-async def ask_broadcast(msg: types.Message):
-    await msg.answer("✍️ أرسل الرسالة")
+async def broadcast(message: types.Message):
+    await message.answer("أرسل الرسالة")
 
-@dp.message_handler(lambda m: m.from_user.id == ADMIN_ID and m.reply_to_message is None)
-async def broadcast(msg: types.Message):
-    sent = 0
-    for uid in get_users():
-        try:
-            await bot.send_message(int(uid), msg.text)
-            sent += 1
-        except:
-            pass
-    await msg.answer(f"✅ تم الإرسال إلى {sent} مستخدم")
+    @dp.message_handler(lambda m: m.from_user.id == ADMIN_ID)
+    async def send_all(msg: types.Message):
+        for u in load_users():
+            try:
+                await bot.send_message(u[0], msg.text)
+            except:
+                pass
+        await msg.answer("✅ تم الإرسال", reply_markup=admin_kb)
 
-# ================== تشغيل ==================
+# ================== Render ==================
+class Dummy(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+def run_server():
+    port = int(os.environ.get("PORT", 10000))
+    HTTPServer(("0.0.0.0", port), Dummy).serve_forever()
+
+threading.Thread(target=run_server, daemon=True).start()
+
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
