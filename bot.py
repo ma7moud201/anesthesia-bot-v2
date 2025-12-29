@@ -57,22 +57,27 @@ def sheet_get_users():
 
 def sheet_add_user(uid, name, username):
     try:
-        requests.post(SHEET_URL, json={
-            "action": "add",
-            "id": uid,
-            "name": name,
-            "username": username,
-            "date": datetime.now().strftime("%Y-%m-%d %H:%M")
-        }, timeout=5)
+        requests.post(
+            SHEET_URL,
+            json={
+                "action": "add",
+                "id": uid,
+                "name": name,
+                "username": username,
+                "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+            },
+            timeout=5
+        )
     except:
         pass
 
 def sheet_remove_user(uid):
     try:
-        requests.post(SHEET_URL, json={
-            "action": "remove",
-            "id": uid
-        }, timeout=5)
+        requests.post(
+            SHEET_URL,
+            json={"action": "remove", "id": uid},
+            timeout=5
+        )
     except:
         pass
 
@@ -80,7 +85,7 @@ def is_approved(uid):
     if uid == ADMIN_ID:
         return True
     users = sheet_get_users()
-    return any(str(u["id"]) == str(uid) for u in users)
+    return any(str(u.get("id")) == str(uid) for u in users)
 
 # ================== كيبورد ==================
 start_kb = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -131,7 +136,7 @@ async def start(message: types.Message):
 # ================== موافقة ==================
 @dp.callback_query_handler(lambda c: c.data.startswith("approve_"))
 async def approve(call: types.CallbackQuery):
-    uid = call.data.split("_")[1]
+    uid = int(call.data.split("_")[1])
     user = await bot.get_chat(uid)
     sheet_add_user(uid, user.full_name, user.username or "—")
     await bot.send_message(uid, "✅ تمت الموافقة، أرسل /start")
@@ -139,7 +144,7 @@ async def approve(call: types.CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data.startswith("reject_"))
 async def reject(call: types.CallbackQuery):
-    uid = call.data.split("_")[1]
+    uid = int(call.data.split("_")[1])
     await bot.send_message(uid, "❌ تم رفض طلبك")
     await call.message.edit_text("❌ تم الرفض")
 
@@ -170,7 +175,7 @@ async def stats(message: types.Message):
     users = sheet_get_users()
     text = f"👥 العدد: {len(users)}\n\n"
     for u in users:
-        text += f"👤 {u['name']}\n🔗 @{u['username']}\n🆔 {u['id']}\n──────\n"
+        text += f"👤 {u.get('name')}\n🔗 @{u.get('username')}\n🆔 {u.get('id')}\n──────\n"
     await message.answer(text, reply_markup=admin_kb)
 
 # ================== طرد مستخدم ==================
@@ -187,7 +192,7 @@ async def kick_user(message: types.Message):
     WAITING_KICK_ID.remove(message.from_user.id)
     await message.answer("✅ تم الطرد – سيُطلب منه موافقة جديدة", reply_markup=admin_kb)
 
-# ================== رسالة جماعية (مُصححة) ==================
+# ================== رسالة جماعية ==================
 @dp.message_handler(lambda m: m.text == "📢 رسالة جماعية" and m.from_user.id == ADMIN_ID)
 async def broadcast(message: types.Message):
     WAITING_BROADCAST.add(message.from_user.id)
@@ -201,7 +206,7 @@ async def send_all(message: types.Message):
     users = sheet_get_users()
     for u in users:
         try:
-            await bot.send_message(u["id"], message.text)
+            await bot.send_message(u.get("id"), message.text)
         except:
             pass
 
@@ -221,5 +226,6 @@ def run_server():
 
 threading.Thread(target=run_server, daemon=True).start()
 
+# ================== تشغيل ==================
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
