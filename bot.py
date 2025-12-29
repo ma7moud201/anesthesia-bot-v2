@@ -15,7 +15,7 @@ if not TOKEN:
 
 ADMIN_ID = 642912725
 
-# 🔴 حط رابط Google Sheets Web App هون
+# 🔴 رابط Google Sheets Web App
 SHEET_URL = "https://script.google.com/macros/s/AKfycbwEikV411sfmARd3IB4VpDYi1tsjMlNYqyc1eUgUwhLulPPhO5aYNS2KV4nPuz6zyqgMg/exec"
 
 bot = Bot(token=TOKEN)
@@ -49,23 +49,32 @@ TERM2_SUBJECTS = [
 
 # ================== Google Sheets ==================
 def sheet_get_users():
-    r = requests.get(SHEET_URL, params={"action": "get"})
-    return r.json()
+    try:
+        r = requests.get(SHEET_URL, params={"action": "get"}, timeout=5)
+        return r.json()
+    except:
+        return []
 
 def sheet_add_user(uid, name, username):
-    requests.post(SHEET_URL, json={
-        "action": "add",
-        "id": uid,
-        "name": name,
-        "username": username,
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M")
-    })
+    try:
+        requests.post(SHEET_URL, json={
+            "action": "add",
+            "id": uid,
+            "name": name,
+            "username": username,
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+        }, timeout=5)
+    except:
+        pass
 
 def sheet_remove_user(uid):
-    requests.post(SHEET_URL, json={
-        "action": "remove",
-        "id": uid
-    })
+    try:
+        requests.post(SHEET_URL, json={
+            "action": "remove",
+            "id": uid
+        }, timeout=5)
+    except:
+        pass
 
 def is_approved(uid):
     if uid == ADMIN_ID:
@@ -92,6 +101,10 @@ def subjects_kb(subjects):
         kb.add(s)
     kb.add("🔙 رجوع")
     return kb
+
+# ================== حالات ==================
+WAITING_BROADCAST = set()
+WAITING_KICK_ID = set()
 
 # ================== START ==================
 @dp.message_handler(commands=["start"])
@@ -160,32 +173,42 @@ async def stats(message: types.Message):
         text += f"👤 {u['name']}\n🔗 @{u['username']}\n🆔 {u['id']}\n──────\n"
     await message.answer(text, reply_markup=admin_kb)
 
-# ================== طرد ==================
+# ================== طرد مستخدم ==================
 @dp.message_handler(lambda m: m.text == "🚫 طرد مستخدم" and m.from_user.id == ADMIN_ID)
 async def ask_id(message: types.Message):
-    await message.answer("أرسل ID المستخدم")
+    WAITING_KICK_ID.add(message.from_user.id)
+    await message.answer("🆔 أرسل ID المستخدم")
 
 @dp.message_handler(lambda m: m.from_user.id == ADMIN_ID and m.text.isdigit())
 async def kick_user(message: types.Message):
+    if message.from_user.id not in WAITING_KICK_ID:
+        return
     sheet_remove_user(message.text)
+    WAITING_KICK_ID.remove(message.from_user.id)
     await message.answer("✅ تم الطرد – سيُطلب منه موافقة جديدة", reply_markup=admin_kb)
 
-# ================== رسالة جماعية ==================
+# ================== رسالة جماعية (مُصححة) ==================
 @dp.message_handler(lambda m: m.text == "📢 رسالة جماعية" and m.from_user.id == ADMIN_ID)
 async def broadcast(message: types.Message):
-    await message.answer("أرسل الرسالة")
+    WAITING_BROADCAST.add(message.from_user.id)
+    await message.answer("✉️ أرسل الرسالة الآن")
 
-    @dp.message_handler(lambda m: m.from_user.id == ADMIN_ID)
-    async def send_all(msg: types.Message):
-        users = sheet_get_users()
-        for u in users:
-            try:
-                await bot.send_message(u["id"], msg.text)
-            except:
-                pass
-        await msg.answer("✅ تم الإرسال", reply_markup=admin_kb)
+@dp.message_handler(lambda m: m.from_user.id == ADMIN_ID)
+async def send_all(message: types.Message):
+    if message.from_user.id not in WAITING_BROADCAST:
+        return
 
-# ================== Render ==================
+    users = sheet_get_users()
+    for u in users:
+        try:
+            await bot.send_message(u["id"], message.text)
+        except:
+            pass
+
+    WAITING_BROADCAST.remove(message.from_user.id)
+    await message.answer("✅ تم الإرسال", reply_markup=admin_kb)
+
+# ================== Render Dummy Server ==================
 class Dummy(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
